@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
+import type { Prisma } from "@/generated/prisma/client";
 import { AssetDisposition, DeliveryStatus, RepairStatus, ResolutionItem, ResolutionType } from "@/generated/prisma/enums";
 import { requireAuthenticatedUser } from "@/lib/auth-guard";
 import { importNinjaDevices, type DeviceImportResult } from "@/lib/import-ninja-devices";
@@ -35,6 +36,27 @@ function requiredString(formData: FormData, key: string): string {
     throw new Error(`${key} is required.`);
   }
   return value.trim();
+}
+
+async function createNumberedDelivery(
+  transaction: Prisma.TransactionClient,
+  data: Omit<Prisma.DeliveryUncheckedCreateInput, "deliveryNumber">,
+) {
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    const deliveries = await transaction.delivery.findMany({ select: { deliveryNumber: true } });
+    const highestSequence = deliveries.reduce((highest, delivery) => {
+      const match = /^DL-(\d+)$/.exec(delivery.deliveryNumber);
+      return match ? Math.max(highest, Number.parseInt(match[1], 10)) : highest;
+    }, 0);
+    try {
+      return await transaction.delivery.create({
+        data: { ...data, deliveryNumber: `DL-${String(highestSequence + 1).padStart(4, "0")}` },
+      });
+    } catch (error) {
+      if (!(typeof error === "object" && error && "code" in error && error.code === "P2002")) throw error;
+    }
+  }
+  throw new Error("Could not reserve the next delivery number. Please try again.");
 }
 
 export interface CreateDeviceState {
@@ -362,14 +384,10 @@ export async function createDraftDelivery(pickupId: string) {
   });
   if (!pickup.repairs.length) throw new Error("This pickup has no available devices to deliver.");
 
-  const deliveryCount = await prisma.delivery.count();
   const delivery = await prisma.$transaction(async (transaction) => {
-    const draft = await transaction.delivery.create({
-      data: {
-        deliveryNumber: `DL-${String(deliveryCount + 1).padStart(4, "0")}`,
-        pickupId,
-        customerId: pickup.customerId,
-      },
+    const draft = await createNumberedDelivery(transaction, {
+      pickupId,
+      customerId: pickup.customerId,
     });
     await transaction.repairIntake.updateMany({
       where: { id: { in: pickup.repairs.map((repair) => repair.id) } },
@@ -492,13 +510,7 @@ export async function createStandaloneDelivery(formData: FormData) {
   await requireAuthenticatedUser();
   const customerId = requiredString(formData, "customerId");
   await prisma.customer.findFirstOrThrow({ where: { id: customerId, removedAt: null } });
-  const deliveryCount = await prisma.delivery.count();
-  const delivery = await prisma.delivery.create({
-    data: {
-      deliveryNumber: `DL-${String(deliveryCount + 1).padStart(4, "0")}`,
-      customerId,
-    },
-  });
+  const delivery = await prisma.$transaction((transaction) => createNumberedDelivery(transaction, { customerId }));
 
   revalidatePath("/deliveries");
   redirect(`/deliveries/${delivery.id}`);
@@ -550,7 +562,7 @@ export async function finalizeDelivery(deliveryId: string) {
       data: { status: DeliveryStatus.DELIVERED, deliveredAt: new Date(), warrantyStart: delivery.items.length ? new Date() : undefined },
     }),
     prisma.repairIntake.updateMany({
-      where: { deliveryId },
+      where: { deliveryId, asset: { disposition: AssetDisposition.ACTIVE } },
       data: { status: RepairStatus.DELIVERED },
     }),
   ]);
@@ -609,13 +621,9 @@ export async function disposeRepairDevice(intakeId: string, formData: FormData) 
       if (existingDraft) {
         targetDeliveryId = existingDraft.id;
       } else {
-        const deliveryCount = await transaction.delivery.count();
-        const delivery = await transaction.delivery.create({
-          data: {
-            deliveryNumber: `DL-${String(deliveryCount + 1).padStart(4, "0")}`,
-            pickupId: intake.pickupId,
-            customerId: intake.pickup.customerId,
-          },
+        const delivery = await createNumberedDelivery(transaction, {
+          pickupId: intake.pickupId,
+          customerId: intake.pickup.customerId,
         });
         targetDeliveryId = delivery.id;
       }
