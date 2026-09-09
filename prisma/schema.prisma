@@ -1,0 +1,232 @@
+datasource db {
+  provider = "sqlite"
+}
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+model Partner {
+  id        String     @id @default(cuid())
+  name      String // e.g. "Stand-In Consulting / Shad Harth"
+  customers Customer[]
+}
+
+model Customer {
+  id         String     @id @default(cuid())
+  name       String // e.g. "Cicero Therapies"
+  partnerId  String?
+  partner    Partner?   @relation(fields: [partnerId], references: [id], onDelete: SetNull)
+  locations  Location[]
+  assets     Asset[]
+  pickups    Pickup[]
+  deliveries Delivery[]
+  removedAt  DateTime?
+}
+
+model Location {
+  id         String   @id @default(cuid())
+  code       String // e.g. "KCT", "SLC", "CP", "KS"
+  name       String // e.g. "K1ds Count Therapy", "Child's Play"
+  customerId String
+  customer   Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  assets     Asset[]
+
+  @@unique([customerId, code])
+}
+
+model Asset {
+  id           String  @id @default(cuid())
+  serialNumber String  @unique
+  assetTag     String? @unique
+  ninjaId      Int?    @unique
+
+  // Normalized Hardware Specs
+  brand     String // "Apple", "Samsung", "Lenovo"
+  family    String? // "MacBook Air", "Galaxy Tab A7 Lite", "iPad 8th Gen"
+  modelYear Int? // 2020, 2017, etc.
+  chipset   String? // "Apple M1", "Intel Core i3", "Exynos", etc.
+  rawModel  String? // Full string from Ninja: "MacBook Air, Apple M1, 2020"
+
+  locationId String?
+  location   Location? @relation(fields: [locationId], references: [id], onDelete: SetNull)
+  customerId String
+  customer   Customer  @relation(fields: [customerId], references: [id], onDelete: Restrict)
+
+  disposition      AssetDisposition @default(ACTIVE)
+  disposedAt       DateTime?
+  dispositionNotes String?
+
+  repairIntakes RepairIntake[]
+  deliveries    DeliveryItem[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([serialNumber])
+  @@index([assetTag])
+}
+
+model RepairIntake {
+  id           String @id @default(cuid())
+  intakeNumber String
+  assetId      String
+  asset        Asset  @relation(fields: [assetId], references: [id], onDelete: Cascade)
+
+  // Custody tracking
+  pickedUpAt          DateTime      @default(now())
+  dueAt               DateTime?
+  status              RepairStatus  @default(IN_POSSESSION)
+  statusBeforeRemoval RepairStatus?
+  technician          String?
+
+  pickupId String?
+  pickup   Pickup? @relation(fields: [pickupId], references: [id], onDelete: SetNull)
+
+  reportedIssue     String
+  actualIssue       String?
+  resolutionActions RepairResolutionAction[]
+  resolutionNotes   String?
+
+  deliveryId String?
+  delivery   Delivery? @relation(fields: [deliveryId], references: [id], onDelete: SetNull)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([status])
+  @@index([intakeNumber])
+  @@index([assetId])
+  @@index([pickupId])
+}
+
+model RepairResolutionAction {
+  id             String          @id @default(cuid())
+  repairIntakeId String
+  repairIntake   RepairIntake    @relation(fields: [repairIntakeId], references: [id], onDelete: Cascade)
+  type           ResolutionType
+  item           ResolutionItem?
+
+  @@index([type])
+  @@index([item])
+  @@index([repairIntakeId])
+}
+
+model Pickup {
+  id           String         @id @default(cuid())
+  pickupNumber String         @unique
+  pickedUpAt   DateTime
+  notes        String?
+  customerId   String
+  customer     Customer       @relation(fields: [customerId], references: [id], onDelete: Restrict)
+  repairs      RepairIntake[]
+  deliveries   Delivery[]
+  createdAt    DateTime       @default(now())
+  updatedAt    DateTime       @updatedAt
+
+  @@index([customerId])
+  @@index([pickedUpAt])
+}
+
+model Delivery {
+  id             String         @id @default(cuid())
+  deliveryNumber String         @unique
+  status         DeliveryStatus @default(DRAFT)
+  deliveredAt    DateTime?
+  recipientName  String?
+  notes          String?
+
+  pickupId String?
+  pickup   Pickup? @relation(fields: [pickupId], references: [id], onDelete: SetNull)
+
+  customerId String?
+  customer   Customer? @relation(fields: [customerId], references: [id], onDelete: Restrict)
+
+  // Sale & Warranty Tracking
+  warrantyStart DateTime?
+  warrantyDays  Int       @default(90) // e.g. 30, 90, 365 days
+
+  repairs RepairIntake[]
+  items   DeliveryItem[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([pickupId])
+  @@index([customerId])
+}
+
+model DeliveryItem {
+  id         String   @id @default(cuid())
+  deliveryId String
+  delivery   Delivery @relation(fields: [deliveryId], references: [id], onDelete: Cascade)
+  assetId    String
+  asset      Asset    @relation(fields: [assetId], references: [id], onDelete: Restrict)
+  itemType   ItemType @default(REPAIR_RETURN) // REPAIR_RETURN or OUTRIGHT_SALE
+  priceCents Int?
+}
+
+enum RepairStatus {
+  IN_POSSESSION
+  IN_TRIAGE
+  WAITING_PARTS
+  IN_REPAIR
+  READY_FOR_DELIVERY
+  DELIVERED
+  REMOVED
+  CANCELLED
+}
+
+enum ResolutionType {
+  REPLACE_DEVICE
+  REPLACE_PART
+  RESET
+  MISC
+}
+
+enum ResolutionItem {
+  SCREEN
+  BATTERY
+  IO_BOARD
+  MAIN_BOARD
+  CHARGER_PORT
+  SPEAKER
+  RAM
+  DRIVE
+  FRAME
+  KEYBOARD
+  TRACKPAD
+  TOUCH_DIGITIZER
+  CAMERA
+  MICROPHONE
+  FAN
+  HEATSINK
+  HINGE
+  DISPLAY_CABLE
+  WIFI_CARD
+  OTHER
+  FACTORY_RESET
+  SMC
+  PRAM
+  SOFT_RESET
+  ENROLL
+  INSTALL
+}
+
+enum AssetDisposition {
+  ACTIVE
+  RECYCLED
+  REMOVED
+}
+
+enum ItemType {
+  REPAIR_RETURN
+  OUTRIGHT_SALE
+}
+
+enum DeliveryStatus {
+  DRAFT
+  DELIVERED
+  CANCELLED
+}
