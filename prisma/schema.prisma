@@ -57,6 +57,7 @@ model Asset {
   disposition      AssetDisposition @default(ACTIVE)
   disposedAt       DateTime?
   dispositionNotes String?
+  notes            String?
 
   repairIntakes RepairIntake[]
   deliveries    DeliveryItem[]

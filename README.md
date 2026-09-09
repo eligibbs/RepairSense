@@ -26,3 +26,15 @@ Open [http://localhost:3000](http://localhost:3000).
 
 The compact design tokens and component presets live in `src/app/globals.css`.
 The initial repair-domain schema lives in `prisma/schema.prisma`.
+
+
+## Update the LXC
+
+cd /opt/repairsense/app
+sudo -u repairsense git pull --ff-only
+sudo -u repairsense npm ci
+sudo -u repairsense sh -c 'set -a; . /etc/repairsense.env; set +a; npx prisma generate'
+sudo -u repairsense sh -c 'set -a; . /etc/repairsense.env; set +a; npx prisma db push'
+sudo -u repairsense sh -c 'set -a; . /etc/repairsense.env; set +a; npm run build'
+sudo systemctl restart repairsense
+sudo systemctl status repairsense

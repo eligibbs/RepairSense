@@ -42,6 +42,64 @@ export interface CreateDeviceState {
   device?: { id: string; name: string; serialNumber: string; assetTag: string | null; location: string | null };
 }
 
+export interface UpdateDeviceState {
+  error?: string;
+  saved?: boolean;
+}
+
+export async function updateDeviceDetails(assetId: string, _state: UpdateDeviceState, formData: FormData): Promise<UpdateDeviceState> {
+  await requireAuthenticatedUser();
+  const brandInput = String(formData.get("brand") ?? "").trim();
+  const modelInput = String(formData.get("family") ?? "").trim();
+  const serialNumber = String(formData.get("serialNumber") ?? "").trim();
+  const assetTag = String(formData.get("assetTag") ?? "").trim() || null;
+  const locationId = String(formData.get("locationId") ?? "").trim() || null;
+  const modelYearInput = String(formData.get("modelYear") ?? "").trim();
+  const chipsetInput = String(formData.get("chipset") ?? "").trim();
+  if (!brandInput || !modelInput || !serialNumber) return { error: "Brand, model, and serial number are required." };
+  if (brandInput.length > 100 || modelInput.length > 300 || serialNumber.length > 200 || (assetTag?.length ?? 0) > 200 || chipsetInput.length > 200) return { error: "One or more device details are too long." };
+  const modelYear = modelYearInput ? Number(modelYearInput) : null;
+  if (modelYear !== null && (!Number.isInteger(modelYear) || modelYear < 1970 || modelYear > new Date().getFullYear() + 1)) return { error: "Enter a valid four-digit model year." };
+
+  const device = await prisma.asset.findUnique({ where: { id: assetId }, select: { customerId: true } });
+  if (!device) return { error: "This device no longer exists." };
+  if (locationId) {
+    const location = await prisma.location.findFirst({ where: { id: locationId, customerId: device.customerId }, select: { id: true } });
+    if (!location) return { error: "Select a location belonging to this customer." };
+  }
+  const duplicate = await prisma.asset.findFirst({
+    where: { id: { not: assetId }, OR: [{ serialNumber }, ...(assetTag ? [{ assetTag }] : [])] },
+    select: { serialNumber: true, assetTag: true },
+  });
+  if (duplicate?.serialNumber === serialNumber) return { error: `Serial number ${serialNumber} is already assigned.` };
+  if (assetTag && duplicate?.assetTag === assetTag) return { error: `Asset tag ${assetTag} is already assigned.` };
+
+  const specs = normalizeNinjaDevice({ deviceMake: brandInput, deviceModel: modelInput, processorsName: chipsetInput });
+  try {
+    await prisma.asset.update({
+      where: { id: assetId },
+      data: {
+        brand: specs.brand,
+        family: specs.family,
+        rawModel: modelInput,
+        modelYear: modelYear ?? specs.modelYear,
+        chipset: chipsetInput || specs.chipset,
+        serialNumber,
+        assetTag,
+        locationId,
+      },
+    });
+  } catch (error) {
+    if (typeof error === "object" && error && "code" in error && error.code === "P2002") return { error: "That serial number or asset tag was assigned by another request." };
+    throw error;
+  }
+  revalidatePath("/");
+  revalidatePath("/devices");
+  revalidatePath(`/devices/${assetId}`);
+  revalidatePath("/deliveries");
+  return { saved: true };
+}
+
 export async function createManagedDevice(_state: CreateDeviceState, formData: FormData): Promise<CreateDeviceState> {
   await requireAuthenticatedUser();
   const customerId = String(formData.get("customerId") ?? "").trim();
@@ -289,7 +347,18 @@ export async function createDraftDelivery(pickupId: string) {
 
   const pickup = await prisma.pickup.findUniqueOrThrow({
     where: { id: pickupId },
-    include: { repairs: { where: { status: { notIn: closedRepairStatuses }, deliveryId: null }, select: { id: true } } },
+    include: {
+      repairs: {
+        where: {
+          deliveryId: null,
+          OR: [
+            { status: { notIn: closedRepairStatuses } },
+            { status: RepairStatus.REMOVED, asset: { disposition: AssetDisposition.RECYCLED } },
+          ],
+        },
+        select: { id: true },
+      },
+    },
   });
   if (!pickup.repairs.length) throw new Error("This pickup has no available devices to deliver.");
 
@@ -501,8 +570,12 @@ export async function reopenDelivery(deliveryId: string) {
       data: { status: DeliveryStatus.DRAFT, deliveredAt: null, warrantyStart: null },
     }),
     prisma.repairIntake.updateMany({
-      where: { deliveryId, status: RepairStatus.DELIVERED },
+      where: { deliveryId, status: RepairStatus.DELIVERED, asset: { disposition: AssetDisposition.ACTIVE } },
       data: { status: RepairStatus.READY_FOR_DELIVERY },
+    }),
+    prisma.repairIntake.updateMany({
+      where: { deliveryId, status: RepairStatus.DELIVERED, asset: { disposition: AssetDisposition.RECYCLED } },
+      data: { status: RepairStatus.REMOVED },
     }),
   ]);
 
@@ -523,23 +596,47 @@ export async function disposeRepairDevice(intakeId: string, formData: FormData) 
   const notes = String(formData.get("dispositionNotes") ?? "").trim() || null;
   const intake = await prisma.repairIntake.findFirstOrThrow({
     where: { id: intakeId, status: { notIn: closedRepairStatuses } },
-    select: { assetId: true, status: true },
+    select: { assetId: true, status: true, pickupId: true, deliveryId: true, pickup: { select: { customerId: true } } },
   });
 
-  await prisma.$transaction([
-    prisma.asset.update({
+  const deliveryId = await prisma.$transaction(async (transaction) => {
+    let targetDeliveryId = disposition === AssetDisposition.RECYCLED ? intake.deliveryId : null;
+    if (disposition === AssetDisposition.RECYCLED && !targetDeliveryId && intake.pickupId && intake.pickup) {
+      const existingDraft = await transaction.delivery.findFirst({
+        where: { pickupId: intake.pickupId, status: DeliveryStatus.DRAFT },
+        select: { id: true },
+      });
+      if (existingDraft) {
+        targetDeliveryId = existingDraft.id;
+      } else {
+        const deliveryCount = await transaction.delivery.count();
+        const delivery = await transaction.delivery.create({
+          data: {
+            deliveryNumber: `DL-${String(deliveryCount + 1).padStart(4, "0")}`,
+            pickupId: intake.pickupId,
+            customerId: intake.pickup.customerId,
+          },
+        });
+        targetDeliveryId = delivery.id;
+      }
+    }
+
+    await transaction.asset.update({
       where: { id: intake.assetId },
       data: { disposition, disposedAt: new Date(), dispositionNotes: notes },
-    }),
-    prisma.repairIntake.update({
+    });
+    await transaction.repairIntake.update({
       where: { id: intakeId },
-      data: { statusBeforeRemoval: intake.status, status: RepairStatus.REMOVED, deliveryId: null },
-    }),
-  ]);
+      data: { statusBeforeRemoval: intake.status, status: RepairStatus.REMOVED, deliveryId: targetDeliveryId },
+    });
+    return targetDeliveryId;
+  });
 
   revalidatePath("/");
   revalidatePath("/customers");
   revalidatePath("/devices");
+  revalidatePath("/deliveries");
+  if (deliveryId) revalidatePath(`/deliveries/${deliveryId}`);
   revalidatePath(`/devices/${intake.assetId}`);
   revalidatePath(`/work-orders/${intakeId}`);
   redirect(`/work-orders/${intakeId}?disposed=${disposition.toLowerCase()}`);
@@ -712,4 +809,20 @@ export async function deleteDraftDelivery(deliveryId: string) {
   revalidatePath("/devices");
   revalidatePath("/deliveries");
   redirect("/deliveries?deleted=1");
+}
+
+export async function updateDeviceNotes(assetId: string, formData: FormData) {
+  await requireAuthenticatedUser();
+  const notes = String(formData.get("notes") ?? "").trim();
+  if (notes.length > 10_000) throw new Error("Device notes must be 10,000 characters or fewer.");
+  await prisma.asset.update({ where: { id: assetId }, data: { notes: notes || null } });
+  revalidatePath(`/devices/${assetId}`);
+}
+
+export async function updateDeliveryNotes(deliveryId: string, formData: FormData) {
+  await requireAuthenticatedUser();
+  const notes = String(formData.get("notes") ?? "").trim();
+  if (notes.length > 10_000) throw new Error("Delivery notes must be 10,000 characters or fewer.");
+  await prisma.delivery.update({ where: { id: deliveryId }, data: { notes: notes || null } });
+  revalidatePath(`/deliveries/${deliveryId}`);
 }
