@@ -1,11 +1,14 @@
-import { Plus, Search } from "lucide-react";
+import { LogOut, Plus, Search } from "lucide-react";
 import Image from "next/image";
 import Link from "next/link";
 import type { ReactNode } from "react";
+import { auth, signOut } from "@/auth";
 import { Navigation } from "./navigation";
 import { ThemeToggle } from "./theme-toggle";
 
-export function AppShell({ children }: { children: ReactNode }) {
+export async function AppShell({ children }: { children: ReactNode }) {
+  const session = await auth();
+
   return (
     <div className="min-h-screen bg-canvas text-foreground">
       <header className="sticky top-0 z-20 flex h-12 items-center border-b border-border bg-white px-gutter">
@@ -20,6 +23,19 @@ export function AppShell({ children }: { children: ReactNode }) {
             <input className="control w-64 pl-8" id="global-search" name="q" placeholder="Search orders, customers…" />
           </form>
           <ThemeToggle />
+          {session?.user ? (
+            <form
+              action={async () => {
+                "use server";
+                await signOut({ redirectTo: "/login" });
+              }}
+            >
+              <button className="button-ghost" title={`Sign out ${session.user.email ?? ""}`} type="submit">
+                <LogOut aria-hidden="true" className="size-3.5" />
+                <span className="hidden xl:inline">Sign out</span>
+              </button>
+            </form>
+          ) : null}
           <Link className="button-primary" href="/pickups/new">
             <Plus aria-hidden="true" className="size-3.5" /> New pickup
           </Link>

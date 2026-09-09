@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { AssetDisposition, DeliveryStatus, RepairStatus, ResolutionItem, ResolutionType } from "@/generated/prisma/enums";
+import { requireAuthenticatedUser } from "@/lib/auth-guard";
 import { importNinjaDevices, type DeviceImportResult } from "@/lib/import-ninja-devices";
 import { normalizeNinjaDevice } from "@/lib/normalizeDevice";
 import { prisma } from "@/lib/prisma";
@@ -42,6 +43,7 @@ export interface CreateDeviceState {
 }
 
 export async function createManagedDevice(_state: CreateDeviceState, formData: FormData): Promise<CreateDeviceState> {
+  await requireAuthenticatedUser();
   const customerId = String(formData.get("customerId") ?? "").trim();
   const brandInput = String(formData.get("brand") ?? "").trim();
   const modelInput = String(formData.get("family") ?? "").trim();
@@ -84,6 +86,7 @@ export async function createManagedDevice(_state: CreateDeviceState, formData: F
 export interface CsvImportState { error?: string; result?: DeviceImportResult }
 
 export async function importDeviceCsv(_state: CsvImportState, formData: FormData): Promise<CsvImportState> {
+  await requireAuthenticatedUser();
   const customerId = String(formData.get("customerId") ?? "").trim();
   const file = formData.get("file");
   if (!customerId) return { error: "Select a customer for this import." };
@@ -101,6 +104,7 @@ export async function importDeviceCsv(_state: CsvImportState, formData: FormData
 }
 
 export async function createPickup(formData: FormData) {
+  await requireAuthenticatedUser();
   const customerId = requiredString(formData, "customerId");
   const pickedUpDate = requiredString(formData, "pickedUpAt");
   const assetIds = formData.getAll("assetId").filter((value): value is string => typeof value === "string" && Boolean(value));
@@ -153,6 +157,7 @@ export async function createPickup(formData: FormData) {
 }
 
 export async function addDevicesToPickup(pickupId: string, formData: FormData) {
+  await requireAuthenticatedUser();
   const assetIds = [...new Set(formData.getAll("assetId").filter((value): value is string => typeof value === "string" && Boolean(value)))];
   if (!assetIds.length) throw new Error("Select at least one device to add.");
 
@@ -193,6 +198,7 @@ export async function addDevicesToPickup(pickupId: string, formData: FormData) {
 }
 
 export async function createCustomer(formData: FormData) {
+  await requireAuthenticatedUser();
   const name = requiredString(formData, "name");
   const customer = await prisma.customer.create({ data: { name } });
   revalidatePath("/customers");
@@ -200,6 +206,7 @@ export async function createCustomer(formData: FormData) {
 }
 
 export async function createLocation(customerId: string, formData: FormData) {
+  await requireAuthenticatedUser();
   const code = requiredString(formData, "code").toUpperCase();
   const name = requiredString(formData, "name");
   await prisma.location.create({ data: { customerId, code, name } });
@@ -208,6 +215,7 @@ export async function createLocation(customerId: string, formData: FormData) {
 }
 
 export async function updateLocation(customerId: string, locationId: string, formData: FormData) {
+  await requireAuthenticatedUser();
   const code = requiredString(formData, "code").toUpperCase();
   const name = requiredString(formData, "name");
   const result = await prisma.location.updateMany({ where: { id: locationId, customerId }, data: { code, name } });
@@ -218,6 +226,7 @@ export async function updateLocation(customerId: string, locationId: string, for
 }
 
 export async function updateRepairIntake(intakeId: string, formData: FormData) {
+  await requireAuthenticatedUser();
   const intake = await prisma.repairIntake.findUniqueOrThrow({ where: { id: intakeId }, select: { status: true, pickupId: true } });
   const requestedStatus = String(formData.get("status") ?? "");
   const status = closedRepairStatuses.includes(intake.status) ? intake.status : requestedStatus;
@@ -271,6 +280,7 @@ export async function updateRepairIntake(intakeId: string, formData: FormData) {
 }
 
 export async function createDraftDelivery(pickupId: string) {
+  await requireAuthenticatedUser();
   const existing = await prisma.delivery.findFirst({
     where: { pickupId, status: DeliveryStatus.DRAFT },
     select: { id: true },
@@ -305,6 +315,7 @@ export async function createDraftDelivery(pickupId: string) {
 }
 
 export async function removeOpenPickup(pickupId: string) {
+  await requireAuthenticatedUser();
   const pickup = await prisma.pickup.findUniqueOrThrow({
     where: { id: pickupId },
     include: {
@@ -342,6 +353,7 @@ export async function removeOpenPickup(pickupId: string) {
 }
 
 export async function permanentlyDeleteRepairRecord(intakeId: string) {
+  await requireAuthenticatedUser();
   const intake = await prisma.repairIntake.findFirstOrThrow({
     where: { id: intakeId, status: RepairStatus.CANCELLED },
     select: { assetId: true, pickupId: true },
@@ -363,6 +375,7 @@ export async function permanentlyDeleteRepairRecord(intakeId: string) {
 }
 
 export async function removeRepairFromPickup(intakeId: string, returnToDashboard: boolean, formData: FormData) {
+  await requireAuthenticatedUser();
   void formData;
   const intake = await prisma.repairIntake.findFirstOrThrow({
     where: { id: intakeId, pickupId: { not: null }, status: { notIn: closedRepairStatuses } },
@@ -407,6 +420,7 @@ export async function removeRepairFromPickup(intakeId: string, returnToDashboard
 }
 
 export async function createStandaloneDelivery(formData: FormData) {
+  await requireAuthenticatedUser();
   const customerId = requiredString(formData, "customerId");
   await prisma.customer.findFirstOrThrow({ where: { id: customerId, removedAt: null } });
   const deliveryCount = await prisma.delivery.count();
@@ -422,6 +436,7 @@ export async function createStandaloneDelivery(formData: FormData) {
 }
 
 export async function removeRepairFromDelivery(deliveryId: string, repairId: string) {
+  await requireAuthenticatedUser();
   await prisma.delivery.findFirstOrThrow({ where: { id: deliveryId, status: DeliveryStatus.DRAFT } });
   await prisma.repairIntake.updateMany({
     where: { id: repairId, deliveryId },
@@ -432,6 +447,7 @@ export async function removeRepairFromDelivery(deliveryId: string, repairId: str
 }
 
 export async function addRepairToDelivery(deliveryId: string, repairId: string) {
+  await requireAuthenticatedUser();
   const delivery = await prisma.delivery.findFirstOrThrow({
     where: { id: deliveryId, status: DeliveryStatus.DRAFT },
     include: { pickup: { select: { customerId: true } } },
@@ -452,6 +468,7 @@ export async function addRepairToDelivery(deliveryId: string, repairId: string) 
 }
 
 export async function finalizeDelivery(deliveryId: string) {
+  await requireAuthenticatedUser();
   const delivery = await prisma.delivery.findFirstOrThrow({
     where: { id: deliveryId, status: DeliveryStatus.DRAFT },
     include: { repairs: { select: { id: true } }, items: { select: { id: true } } },
@@ -476,6 +493,7 @@ export async function finalizeDelivery(deliveryId: string) {
 }
 
 export async function reopenDelivery(deliveryId: string) {
+  await requireAuthenticatedUser();
   await prisma.delivery.findFirstOrThrow({ where: { id: deliveryId, status: DeliveryStatus.DELIVERED } });
   await prisma.$transaction([
     prisma.delivery.update({
@@ -496,6 +514,7 @@ export async function reopenDelivery(deliveryId: string) {
 }
 
 export async function disposeRepairDevice(intakeId: string, formData: FormData) {
+  await requireAuthenticatedUser();
   const dispositionValue = requiredString(formData, "disposition");
   if (dispositionValue !== AssetDisposition.RECYCLED && dispositionValue !== AssetDisposition.REMOVED) {
     throw new Error("Invalid device disposition.");
@@ -527,6 +546,7 @@ export async function disposeRepairDevice(intakeId: string, formData: FormData) 
 }
 
 export async function batchRemoveDevices(formData: FormData) {
+  await requireAuthenticatedUser();
   const assetIds = formData.getAll("assetId").filter((value): value is string => typeof value === "string" && Boolean(value));
   if (!assetIds.length) throw new Error("Select at least one device to remove.");
   const assets = await prisma.asset.findMany({ where: { id: { in: assetIds }, disposition: AssetDisposition.ACTIVE }, select: { id: true } });
@@ -554,6 +574,7 @@ export async function batchRemoveDevices(formData: FormData) {
 }
 
 export async function restoreDevice(assetId: string) {
+  await requireAuthenticatedUser();
   const asset = await prisma.asset.findFirstOrThrow({
     where: { id: assetId, disposition: { not: AssetDisposition.ACTIVE } },
     include: { repairIntakes: { where: { status: RepairStatus.REMOVED }, orderBy: { pickedUpAt: "desc" }, take: 1 } },
@@ -574,6 +595,7 @@ export async function restoreDevice(assetId: string) {
 }
 
 export async function permanentlyDeleteDevice(assetId: string) {
+  await requireAuthenticatedUser();
   await prisma.asset.findFirstOrThrow({ where: { id: assetId, disposition: { not: AssetDisposition.ACTIVE } } });
   await prisma.$transaction([
     prisma.deliveryItem.deleteMany({ where: { assetId } }),
@@ -585,6 +607,7 @@ export async function permanentlyDeleteDevice(assetId: string) {
 }
 
 export async function removeCustomer(customerId: string) {
+  await requireAuthenticatedUser();
   const openRepairs = await prisma.repairIntake.count({
     where: { asset: { customerId }, status: { notIn: closedRepairStatuses } },
   });
@@ -596,6 +619,7 @@ export async function removeCustomer(customerId: string) {
 }
 
 export async function restoreCustomer(customerId: string) {
+  await requireAuthenticatedUser();
   await prisma.customer.update({ where: { id: customerId }, data: { removedAt: null } });
   revalidatePath("/customers");
   revalidatePath("/devices");
@@ -605,6 +629,7 @@ export async function restoreCustomer(customerId: string) {
 export type AddSaleDeviceState = { error?: string; success?: string };
 
 export async function addSaleDevice(deliveryId: string, _state: AddSaleDeviceState, formData: FormData): Promise<AddSaleDeviceState> {
+  await requireAuthenticatedUser();
   const serialNumber = String(formData.get("serialNumber") ?? "").trim();
   const brand = String(formData.get("brand") ?? "").trim();
   const family = String(formData.get("family") ?? "").trim();
@@ -652,6 +677,7 @@ export async function addSaleDevice(deliveryId: string, _state: AddSaleDeviceSta
 }
 
 export async function removeSaleDevice(deliveryId: string, itemId: string) {
+  await requireAuthenticatedUser();
   await prisma.delivery.findFirstOrThrow({ where: { id: deliveryId, status: DeliveryStatus.DRAFT } });
   const item = await prisma.deliveryItem.findFirst({ where: { id: itemId, deliveryId }, select: { assetId: true } });
   if (!item) return;
@@ -666,6 +692,7 @@ export async function removeSaleDevice(deliveryId: string, itemId: string) {
 }
 
 export async function deleteDraftDelivery(deliveryId: string) {
+  await requireAuthenticatedUser();
   const delivery = await prisma.delivery.findFirstOrThrow({
     where: { id: deliveryId, status: DeliveryStatus.DRAFT },
     include: { items: { select: { assetId: true } } },

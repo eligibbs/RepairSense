@@ -1,8 +1,10 @@
 import type { NextRequest } from "next/server";
 import { AssetDisposition, RepairStatus } from "@/generated/prisma/enums";
+import { requireAuthenticatedUser } from "@/lib/auth-guard";
 import { prisma } from "@/lib/prisma";
 
 export async function GET(request: NextRequest) {
+  await requireAuthenticatedUser();
   const query = request.nextUrl.searchParams.get("q")?.trim() ?? "";
   const customerId = request.nextUrl.searchParams.get("customerId")?.trim() ?? "";
   if (!query || !customerId) return Response.json([]);
