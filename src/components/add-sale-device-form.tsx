@@ -3,6 +3,7 @@
 import { Plus } from "lucide-react";
 import { useActionState, useEffect, useRef } from "react";
 import type { AddSaleDeviceState } from "@/app/actions";
+import { BarcodeScannerButton } from "@/components/barcode-scanner-button";
 
 type LocationOption = { id: string; code: string; name: string };
 
@@ -15,6 +16,7 @@ export function AddSaleDeviceForm({
 }) {
   const [state, formAction, pending] = useActionState(action, {});
   const formRef = useRef<HTMLFormElement>(null);
+  const serialNumberRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if (state.success) formRef.current?.reset();
@@ -23,7 +25,7 @@ export function AddSaleDeviceForm({
   return <form action={formAction} className="grid gap-3 p-panel sm:grid-cols-2" ref={formRef}>
     <label className="grid gap-1 text-xs font-medium">Brand<input className="control" name="brand" placeholder="Apple" required /></label>
     <label className="grid gap-1 text-xs font-medium">Model / family<input className="control" name="family" placeholder="iPad 10th Gen" required /></label>
-    <label className="grid gap-1 text-xs font-medium">Serial number<input className="control" name="serialNumber" required /></label>
+    <label className="grid gap-1 text-xs font-medium">Serial number<span className="flex"><input className="control min-w-0 flex-1 rounded-r-none" name="serialNumber" ref={serialNumberRef} required /><BarcodeScannerButton onDetected={(value) => { if (serialNumberRef.current) serialNumberRef.current.value = value; }} /></span></label>
     <label className="grid gap-1 text-xs font-medium">Asset tag<input className="control" name="assetTag" placeholder="Optional" /></label>
     <label className="grid gap-1 text-xs font-medium">Location<select className="control" name="locationId"><option value="">Not assigned</option>{locations.map((location) => <option key={location.id} value={location.id}>{location.code} — {location.name}</option>)}</select></label>
     <div className="flex items-end"><button className="button-primary" disabled={pending} type="submit"><Plus className="size-3.5" />{pending ? "Adding…" : "Add new device"}</button></div>
