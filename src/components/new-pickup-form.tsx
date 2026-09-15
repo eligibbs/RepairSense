@@ -4,6 +4,7 @@ import { Check, Search, X } from "lucide-react";
 import Link from "next/link";
 import { useCallback, useRef, useState } from "react";
 import { createPickup } from "@/app/actions";
+import { BarcodeScannerButton } from "@/components/barcode-scanner-button";
 import { DeviceDialog } from "@/components/device-dialog";
 
 interface CustomerOption {
@@ -66,7 +67,7 @@ export function NewPickupForm({ customers, defaultDate }: { customers: CustomerO
         <label className="grid gap-1 text-xs font-medium">Pickup date<input className="control" defaultValue={defaultDate} name="pickedUpAt" required type="date" /></label>
         <div className="sm:col-span-2">
           <div className="mb-1 flex items-end justify-between gap-3"><span className="text-xs font-medium">Find devices</span><DeviceDialog buttonLabel="Add new device" customers={customers} lockedCustomerId={customerId} onCreated={addCreatedDevice} /></div>
-          <label className="relative block"><span className="sr-only">Find devices</span><Search className="absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted" /><input autoComplete="off" className="control w-full pl-8" disabled={!customerId} onChange={(event) => search(event.target.value)} placeholder={customerId ? "Serial, asset tag, or model" : "Select a customer first"} value={query} /></label>
+          <div className="flex"><label className="relative min-w-0 flex-1"><span className="sr-only">Find devices</span><Search className="absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted" /><input autoComplete="off" className="control w-full rounded-r-none pl-8" disabled={!customerId} onChange={(event) => search(event.target.value)} placeholder={customerId ? "Serial, asset tag, or model" : "Select a customer first"} value={query} /></label><BarcodeScannerButton disabled={!customerId} onDetected={search} /></div>
           <div className="mt-1 min-h-5 text-2xs text-muted">{loading ? "Searching…" : results.length ? `${results.length} available device${results.length === 1 ? "" : "s"} found` : query.trim() ? "No available devices found" : "Start typing to search available devices"}</div>
           {results.length > 0 && <div className="mt-1 max-h-52 overflow-y-auto rounded-md border border-border bg-white divide-y divide-border">{results.map((asset) => <button className="flex w-full items-center justify-between gap-3 px-3 py-2 text-left hover:bg-blue-50/50" key={asset.id} onClick={() => chooseAsset(asset)} type="button"><span><strong className="block text-xs">{asset.name}</strong><span className="text-2xs text-muted">{asset.location ?? "No location"} · {asset.serialNumber}{asset.assetTag ? ` · ${asset.assetTag}` : ""}</span></span><Check className="size-4 text-primary" /></button>)}</div>}
         </div>

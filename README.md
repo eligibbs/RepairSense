@@ -15,9 +15,30 @@ npm run dev
 
 Open [http://localhost:3000](http://localhost:3000).
 
+### Test the camera from a mobile device
+
+Mobile browsers require a trusted HTTPS connection for camera access. Create a
+development certificate that includes the laptop's LAN address:
+
+```bash
+brew install mkcert
+mkcert -install
+mkdir -p .cert
+mkcert -cert-file .cert/dev.pem -key-file .cert/dev-key.pem 10.100.102.171 localhost 127.0.0.1
+npm run dev:https
+```
+
+Run `mkcert -CAROOT`, copy only `rootCA.pem` from that directory to the test
+phone, and install it as a trusted CA certificate. Never copy `rootCA-key.pem`.
+Then open [https://10.100.102.171:3000](https://10.100.102.171:3000). The LAN
+development server bypasses authentication by default, regardless of whether it
+is opened through localhost or the LAN address. Set `LOCAL_AUTH_BYPASS="false"`
+to test Google authentication locally. Production builds always require authentication.
+
 ## Commands
 
 - `npm run dev` — start the development server
+- `npm run dev:https` — start HTTPS development for mobile camera testing
 - `npm run build` — create a production build
 - `npm run lint` — run ESLint
 - `npm run db:generate` — generate Prisma Client

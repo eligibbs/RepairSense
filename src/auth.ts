@@ -1,11 +1,8 @@
 import NextAuth from "next-auth";
 import Google from "next-auth/providers/google";
+import { isLocalDevelopmentAuthBypassEnabled } from "@/lib/local-development";
 
 export const WORKSPACE_DOMAIN = "standinconsulting.com";
-
-function isLocalDevelopmentRequest(url: URL): boolean {
-  return process.env.NODE_ENV === "development" && ["localhost", "127.0.0.1", "::1"].includes(url.hostname);
-}
 
 export const { handlers, auth, signIn, signOut } = NextAuth({
   // Local development bypasses sign-in, but Auth.js still needs a signing key
@@ -23,7 +20,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
   },
   callbacks: {
     authorized({ auth: session, request }) {
-      if (request.nextUrl.pathname === "/login" || isLocalDevelopmentRequest(request.nextUrl)) return true;
+      if (request.nextUrl.pathname === "/login" || isLocalDevelopmentAuthBypassEnabled()) return true;
       return Boolean(session?.user);
     },
     signIn({ account, profile }) {

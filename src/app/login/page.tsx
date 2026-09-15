@@ -1,6 +1,8 @@
 import { LogIn } from "lucide-react";
 import Image from "next/image";
+import { redirect } from "next/navigation";
 import { signIn, WORKSPACE_DOMAIN } from "@/auth";
+import { isLocalDevelopmentAuthBypassEnabled } from "@/lib/local-development";
 
 function safeRedirect(value: FormDataEntryValue | null): string {
   if (typeof value !== "string") return "/";
@@ -19,6 +21,8 @@ export default async function LoginPage({
 }: {
   searchParams: Promise<{ callbackUrl?: string; error?: string }>;
 }) {
+  if (isLocalDevelopmentAuthBypassEnabled()) redirect("/");
+
   const params = await searchParams;
 
   async function signInWithGoogle(formData: FormData) {
